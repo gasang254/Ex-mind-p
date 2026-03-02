@@ -18,10 +18,19 @@ import {
   Sun,
   Moon,
   Volume2,
-  VolumeX
+  VolumeX,
+  Users,
+  Trash2,
+  Phone,
+  Mail,
+  X,
+  Bell,
+  Clock,
+  CheckCircle,
+  Calendar
 } from 'lucide-react';
 import { getChatResponse, analyzeMood, generateSpeech } from './services/geminiService';
-import { MoodLog, JournalEntry, ChatMessage, UserPreferences } from './types';
+import { MoodLog, JournalEntry, ChatMessage, UserPreferences, SupportContact, Reminder } from './types';
 
 const MOODS = [
   { value: 1, icon: Frown, label: 'Struggling', color: 'text-red-500' },
@@ -52,21 +61,72 @@ const Waveform = () => (
   </div>
 );
 
+const BreathingExercise = ({ onClose }: { onClose: () => void }) => {
+  const [phase, setPhase] = useState<'Inhale' | 'Hold' | 'Exhale'>('Inhale');
+  
+  useEffect(() => {
+    const sequence = async () => {
+      while (true) {
+        setPhase('Inhale');
+        await new Promise(r => setTimeout(r, 4000));
+        setPhase('Hold');
+        await new Promise(r => setTimeout(r, 4000));
+        setPhase('Exhale');
+        await new Promise(r => setTimeout(r, 4000));
+      }
+    };
+    sequence();
+  }, []);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 bg-brand-olive/95 flex flex-col items-center justify-center p-6 text-white"
+    >
+      <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-white/10 rounded-full">
+        <X size={24} />
+      </button>
+      
+      <motion.div
+        animate={{
+          scale: phase === 'Inhale' ? 1.5 : phase === 'Hold' ? 1.5 : 1,
+        }}
+        transition={{ duration: 4, ease: "easeInOut" }}
+        className="w-48 h-48 rounded-full border-4 border-white/30 flex items-center justify-center mb-12"
+      >
+        <div className="w-32 h-32 rounded-full bg-white/20 flex items-center justify-center">
+          <span className="serif text-2xl font-medium">{phase}</span>
+        </div>
+      </motion.div>
+      
+      <h2 className="serif text-3xl mb-2 text-center">Box Breathing</h2>
+      <p className="text-sm opacity-70 text-center max-w-xs">Follow the circle. Inhale for 4s, hold for 4s, exhale for 4s.</p>
+    </motion.div>
+  );
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'journal' | 'toolbox' | 'settings'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [journalInput, setJournalInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [moodLogs, setMoodLogs] = useState<MoodLog[]>([]);
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+  const [supportContacts, setSupportContacts] = useState<SupportContact[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [showMoodPicker, setShowMoodPicker] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [showBreathing, setShowBreathing] = useState(false);
+  const [showCrisisInfo, setShowCrisisInfo] = useState(false);
   const [preferences, setPreferences] = useState<UserPreferences>({
     voice: 'Kore',
     language: 'en',
     tone: 'empathetic',
-    backstory: ''
+    backstory: '',
+    isSpeakingEnabled: true
   });
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -82,20 +142,154 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [moodRes, journalRes, chatRes, prefRes] = await Promise.all([
+      const [moodRes, journalRes, chatRes, prefRes, supportRes, reminderRes] = await Promise.all([
         fetch('/api/mood/1'),
         fetch('/api/journal/1'),
         fetch('/api/chat/1'),
-        fetch('/api/preferences/1')
+        fetch('/api/preferences/1'),
+        fetch('/api/support/1'),
+        fetch('/api/reminders/1')
       ]);
       
       if (moodRes.ok) setMoodLogs(await moodRes.json());
       if (journalRes.ok) setJournalEntries(await journalRes.json());
       if (chatRes.ok) setMessages(await chatRes.json());
       if (prefRes.ok) setPreferences(await prefRes.json());
+      if (supportRes.ok) setSupportContacts(await supportRes.json());
+      if (reminderRes.ok) setReminders(await reminderRes.json());
     } catch (error) {
       console.error('Error fetching data:', error);
     }
+  };
+
+  const handleRequestVolunteer = async () => {
+    try {
+      await fetch('/api/volunteer-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 1 })
+      });
+      alert("A Befrienders volunteer has been notified and will reach out to you soon.");
+    } catch (error) {
+      console.error('Error requesting volunteer:', error);
+    }
+  };
+
+  const handleAddContact = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const contact = {
+      name: formData.get('name') as string,
+      relation: formData.get('relation') as string,
+      phone: formData.get('phone') as string,
+      email: formData.get('email') as string,
+    };
+
+    try {
+      await fetch('/api/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 1, ...contact })
+      });
+      fetchData();
+      (e.target as HTMLFormElement).reset();
+    } catch (error) {
+      console.error('Error adding contact:', error);
+    }
+  };
+
+  const handleDeleteContact = async (id: number) => {
+    try {
+      await fetch(`/api/support/${id}`, { method: 'DELETE' });
+      fetchData();
+    } catch (error) {
+      console.error('Error deleting contact:', error);
+    }
+  };
+
+  const handleAddReminder = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const reminder = {
+      activity: formData.get('activity') as string,
+      time: formData.get('time') as string,
+    };
+
+    try {
+      await fetch('/api/reminders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 1, ...reminder })
+      });
+      fetchData();
+      (e.target as HTMLFormElement).reset();
+    } catch (error) {
+      console.error('Error adding reminder:', error);
+    }
+  };
+
+  const handleDeleteReminder = async (id: number) => {
+    try {
+      await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
+      fetchData();
+    } catch (error) {
+      console.error('Error deleting reminder:', error);
+    }
+  };
+
+  const handleToggleReminder = async (id: number, completed: boolean) => {
+    try {
+      await fetch(`/api/reminders/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed })
+      });
+      fetchData();
+    } catch (error) {
+      console.error('Error toggling reminder:', error);
+    }
+  };
+
+  const toggleRecording = (target: 'chat' | 'journal') => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser.");
+      return;
+    }
+
+    if (isRecording) {
+      setIsRecording(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = preferences.language === 'sw' ? 'sw-KE' : 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      if (target === 'chat') {
+        setInput(prev => prev + ' ' + transcript);
+      } else {
+        setJournalInput(prev => prev + ' ' + transcript);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error", event.error);
+      setIsRecording(false);
+    };
+
+    recognition.start();
   };
 
   const savePreferences = async (newPrefs: UserPreferences) => {
@@ -140,7 +334,7 @@ export default function App() {
       });
 
       // Speak if enabled
-      if (isSpeaking) {
+      if (preferences.isSpeakingEnabled) {
         const audioData = await generateSpeech(aiMessage.content, preferences.voice);
         if (audioData) {
           const audio = new Audio(`data:audio/wav;base64,${audioData}`);
@@ -193,15 +387,22 @@ export default function App() {
         </div>
         <div className="flex gap-3">
           <button 
-            onClick={() => setIsSpeaking(!isSpeaking)}
-            className={`p-2 rounded-full transition-colors ${isSpeaking ? 'bg-brand-olive text-white' : 'bg-white text-brand-olive border border-brand-olive/20'}`}
+            onClick={() => {
+              const newPrefs = { ...preferences, isSpeakingEnabled: !preferences.isSpeakingEnabled };
+              setPreferences(newPrefs);
+              savePreferences(newPrefs);
+            }}
+            className={`p-2 rounded-full transition-colors ${preferences.isSpeakingEnabled ? 'bg-brand-olive text-white' : 'bg-white text-brand-olive border border-brand-olive/20'}`}
           >
-            {isSpeaking ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            {preferences.isSpeakingEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
           </button>
-          <div className="bg-red-50 text-red-600 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 border border-red-100">
+          <button 
+            onClick={() => setShowCrisisInfo(true)}
+            className="bg-red-50 text-red-600 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 border border-red-100 hover:bg-red-100 transition-colors"
+          >
             <AlertTriangle size={12} />
             Crisis Help
-          </div>
+          </button>
         </div>
       </header>
 
@@ -281,19 +482,31 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="space-y-6"
             >
-              <div className="p-6 bg-brand-olive text-white rounded-3xl shadow-lg">
+              <div className="p-6 bg-brand-olive text-white rounded-3xl shadow-lg relative">
                 <h2 className="serif text-2xl mb-2">Daily Reflection</h2>
                 <p className="text-sm opacity-80 mb-4">Write down your thoughts. No one is judging.</p>
-                <textarea 
-                  className="w-full bg-white/10 border border-white/20 rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-white/30 min-h-[150px] placeholder:text-white/40"
-                  placeholder="What's on your mind today?"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.ctrlKey) {
-                      handleJournalSubmit(e.currentTarget.value);
-                      e.currentTarget.value = '';
-                    }
-                  }}
-                />
+                <div className="relative">
+                  <textarea 
+                    className="w-full bg-white/10 border border-white/20 rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-white/30 min-h-[150px] placeholder:text-white/40 pr-12"
+                    placeholder="What's on your mind today?"
+                    value={journalInput}
+                    onChange={(e) => setJournalInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && e.ctrlKey) {
+                        handleJournalSubmit(journalInput);
+                        setJournalInput('');
+                      }
+                    }}
+                  />
+                  <button 
+                    onClick={() => toggleRecording('journal')}
+                    className={`absolute bottom-4 right-4 p-2 rounded-full transition-all ${
+                      isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-white/20 text-white hover:bg-white/30'
+                    }`}
+                  >
+                    {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
+                  </button>
+                </div>
                 <div className="mt-2 text-[10px] opacity-50 text-right">Press Ctrl+Enter to save</div>
               </div>
 
@@ -320,21 +533,97 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="grid grid-cols-2 gap-4"
+              className="space-y-8"
             >
-              {[
-                { title: 'Mindfulness', desc: '5-minute breathing exercise', color: 'bg-blue-50 text-blue-700' },
-                { title: 'CBT Reframing', desc: 'Challenge negative thoughts', color: 'bg-emerald-50 text-emerald-700' },
-                { title: 'Crisis Plan', desc: 'Your emergency safety steps', color: 'bg-red-50 text-red-700' },
-                { title: 'Sleep Sounds', desc: 'Ambient noise for rest', color: 'bg-indigo-50 text-indigo-700' },
-                { title: 'Gratitude', desc: 'List 3 things you are thankful for', color: 'bg-amber-50 text-amber-700' },
-                { title: 'Body Scan', desc: 'Connect with your physical self', color: 'bg-purple-50 text-purple-700' },
-              ].map((tool, i) => (
-                <div key={i} className={`p-5 rounded-3xl ${tool.color} cursor-pointer hover:scale-[1.02] transition-transform`}>
-                  <h3 className="serif text-lg mb-1">{tool.title}</h3>
-                  <p className="text-[10px] opacity-70 leading-tight">{tool.desc}</p>
+              <div className="grid grid-cols-2 gap-4">
+                {[
+                  { title: 'Mindfulness', desc: '5-minute breathing exercise', color: 'bg-blue-50 text-blue-700', action: () => setShowBreathing(true) },
+                  { title: 'CBT Reframing', desc: 'Challenge negative thoughts', color: 'bg-emerald-50 text-emerald-700' },
+                  { title: 'Crisis Plan', desc: 'Your emergency safety steps', color: 'bg-red-50 text-red-700' },
+                  { title: 'Request Help', desc: 'Ask a Befrienders volunteer to call', color: 'bg-orange-50 text-orange-700', action: handleRequestVolunteer },
+                  { title: 'Gratitude', desc: 'List 3 things you are thankful for', color: 'bg-amber-50 text-amber-700' },
+                  { title: 'Body Scan', desc: 'Connect with your physical self', color: 'bg-purple-50 text-purple-700' },
+                ].map((tool, i) => (
+                  <div 
+                    key={i} 
+                    onClick={tool.action}
+                    className={`p-5 rounded-3xl ${tool.color} cursor-pointer hover:scale-[1.02] transition-transform flex flex-col justify-between min-h-[120px] shadow-sm`}
+                  >
+                    <h3 className="serif text-lg mb-1">{tool.title}</h3>
+                    <p className="text-[10px] opacity-70 leading-tight">{tool.desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              <section className="bg-brand-cream/20 p-6 rounded-3xl border border-brand-cream/50">
+                <div className="flex items-center gap-2 mb-6">
+                  <Bell size={18} className="text-brand-olive" />
+                  <h3 className="text-xs font-semibold uppercase tracking-widest opacity-40">Self-Care Reminders</h3>
                 </div>
-              ))}
+
+                <div className="space-y-3 mb-6">
+                  {reminders.length === 0 && (
+                    <p className="text-xs text-brand-ink/40 italic text-center py-4">No reminders set. Add one below.</p>
+                  )}
+                  {reminders.map((reminder) => (
+                    <div 
+                      key={reminder.id} 
+                      className={`p-4 bg-white rounded-2xl flex justify-between items-center shadow-sm border transition-all ${
+                        reminder.completed ? 'opacity-50 border-transparent' : 'border-brand-cream'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={() => handleToggleReminder(reminder.id, !reminder.completed)}
+                          className={`p-1 rounded-full transition-colors ${
+                            reminder.completed ? 'text-green-500' : 'text-brand-olive/20 hover:text-brand-olive/40'
+                          }`}
+                        >
+                          <CheckCircle size={20} />
+                        </button>
+                        <div>
+                          <p className={`text-sm font-medium ${reminder.completed ? 'line-through' : ''}`}>
+                            {reminder.activity}
+                          </p>
+                          <div className="flex items-center gap-1 opacity-40">
+                            <Clock size={10} />
+                            <span className="text-[10px]">{reminder.time}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteReminder(reminder.id)}
+                        className="p-2 text-red-400 hover:text-red-600 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <form onSubmit={handleAddReminder} className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input 
+                      name="activity" 
+                      placeholder="Activity (e.g. Drink water)" 
+                      className="text-xs p-3 bg-white border border-brand-cream rounded-xl outline-none focus:ring-2 focus:ring-brand-olive/20" 
+                      required 
+                    />
+                    <input 
+                      name="time" 
+                      type="time" 
+                      className="text-xs p-3 bg-white border border-brand-cream rounded-xl outline-none focus:ring-2 focus:ring-brand-olive/20" 
+                      required 
+                    />
+                  </div>
+                  <button 
+                    type="submit" 
+                    className="w-full p-3 bg-brand-olive text-white text-xs rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-brand-olive/90 transition-colors"
+                  >
+                    <Plus size={14} /> Add Reminder
+                  </button>
+                </form>
+              </section>
             </motion.div>
           )}
 
@@ -346,6 +635,59 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-8 pb-10"
             >
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <Users size={16} className="text-brand-olive" />
+                  <h3 className="text-xs font-semibold uppercase tracking-widest opacity-40">Circle of Support</h3>
+                </div>
+                <div className="space-y-3 mb-4">
+                  {supportContacts.map(contact => (
+                    <div key={contact.id} className="p-3 bg-white border border-brand-cream rounded-xl flex justify-between items-center shadow-sm">
+                      <div>
+                        <p className="text-sm font-medium">{contact.name}</p>
+                        <p className="text-[10px] opacity-60">{contact.relation} • {contact.phone}</p>
+                      </div>
+                      <button onClick={() => handleDeleteContact(contact.id)} className="p-2 text-red-400 hover:text-red-600">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <form onSubmit={handleAddContact} className="grid grid-cols-2 gap-2">
+                  <input name="name" placeholder="Name" className="text-xs p-2 bg-brand-cream/30 border border-brand-cream rounded-lg outline-none" required />
+                  <input name="relation" placeholder="Relation" className="text-xs p-2 bg-brand-cream/30 border border-brand-cream rounded-lg outline-none" required />
+                  <input name="phone" placeholder="Phone" className="text-xs p-2 bg-brand-cream/30 border border-brand-cream rounded-lg outline-none" required />
+                  <button type="submit" className="col-span-2 p-2 bg-brand-olive text-white text-xs rounded-lg font-medium flex items-center justify-center gap-2">
+                    <Plus size={14} /> Add Contact
+                  </button>
+                </form>
+              </section>
+
+              <section>
+                <div className="flex items-center justify-between p-4 bg-brand-cream/20 rounded-2xl border border-brand-cream">
+                  <div className="flex items-center gap-3">
+                    <Volume2 size={18} className="text-brand-olive" />
+                    <div>
+                      <h3 className="text-sm font-medium">Speech Output</h3>
+                      <p className="text-[10px] opacity-60">Enable AI voice for responses</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const newPrefs = { ...preferences, isSpeakingEnabled: !preferences.isSpeakingEnabled };
+                      setPreferences(newPrefs);
+                      savePreferences(newPrefs);
+                    }}
+                    className={`w-12 h-6 rounded-full transition-all relative ${preferences.isSpeakingEnabled ? 'bg-brand-olive' : 'bg-brand-cream'}`}
+                  >
+                    <motion.div 
+                      animate={{ x: preferences.isSpeakingEnabled ? 24 : 2 }}
+                      className="absolute top-1 left-0 w-4 h-4 bg-white rounded-full shadow-sm"
+                    />
+                  </button>
+                </div>
+              </section>
+
               <section>
                 <h3 className="text-xs font-semibold uppercase tracking-widest opacity-40 mb-4">AI Voice Persona</h3>
                 <div className="grid grid-cols-2 gap-3">
@@ -456,7 +798,7 @@ export default function App() {
           <form onSubmit={handleSendMessage} className="flex items-center gap-2">
             <button 
               type="button"
-              onClick={() => setIsRecording(!isRecording)}
+              onClick={() => toggleRecording('chat')}
               className={`p-3 rounded-full transition-all relative ${
                 isRecording 
                   ? 'bg-red-500 text-white shadow-lg shadow-red-200' 
@@ -512,6 +854,45 @@ export default function App() {
           </button>
         ))}
       </nav>
+
+      <AnimatePresence>
+        {showBreathing && <BreathingExercise onClose={() => setShowBreathing(false)} />}
+        {showCrisisInfo && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"
+            onClick={() => setShowCrisisInfo(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertTriangle size={32} />
+              </div>
+              <h2 className="serif text-2xl mb-4 text-brand-ink">You are not alone.</h2>
+              <p className="text-sm text-brand-ink/70 mb-8 leading-relaxed">
+                If you are feeling overwhelmed or having thoughts of self-harm, please reach out to the Befrienders Kenya helpline. They are here to listen and support you.
+              </p>
+              <div className="bg-brand-cream p-4 rounded-2xl mb-8">
+                <p className="text-xs uppercase tracking-widest opacity-60 mb-1">Helpline Number</p>
+                <p className="text-2xl font-mono font-bold text-brand-olive">0722 178 177</p>
+              </div>
+              <button 
+                onClick={() => setShowCrisisInfo(false)}
+                className="w-full py-4 bg-brand-olive text-white rounded-2xl font-medium hover:bg-brand-olive/90 transition-colors"
+              >
+                Close
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

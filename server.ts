@@ -41,6 +41,30 @@ db.exec(`
     content TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS support_contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    name TEXT,
+    relation TEXT,
+    phone TEXT,
+    email TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS volunteer_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    status TEXT DEFAULT 'pending', -- pending, contacted, resolved
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    activity TEXT,
+    time TEXT,
+    completed INTEGER DEFAULT 0
+  );
 `);
 
 async function startServer() {
@@ -96,6 +120,61 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // Support Contacts
+  app.get("/api/support/:user_id", (req, res) => {
+    const stmt = db.prepare("SELECT * FROM support_contacts WHERE user_id = ?");
+    const contacts = stmt.all(req.params.user_id);
+    res.json(contacts);
+  });
+
+  app.post("/api/support", (req, res) => {
+    const { user_id, name, relation, phone, email } = req.body;
+    const stmt = db.prepare("INSERT INTO support_contacts (user_id, name, relation, phone, email) VALUES (?, ?, ?, ?, ?)");
+    stmt.run(user_id || 1, name, relation, phone, email);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/support/:id", (req, res) => {
+    const stmt = db.prepare("DELETE FROM support_contacts WHERE id = ?");
+    stmt.run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // Volunteer Requests
+  app.post("/api/volunteer-request", (req, res) => {
+    const { user_id } = req.body;
+    const stmt = db.prepare("INSERT INTO volunteer_requests (user_id) VALUES (?)");
+    stmt.run(user_id || 1);
+    res.json({ success: true });
+  });
+
+  // Reminders
+  app.get("/api/reminders/:user_id", (req, res) => {
+    const stmt = db.prepare("SELECT * FROM reminders WHERE user_id = ? ORDER BY time ASC");
+    const reminders = stmt.all(req.params.user_id);
+    res.json(reminders);
+  });
+
+  app.post("/api/reminders", (req, res) => {
+    const { user_id, activity, time } = req.body;
+    const stmt = db.prepare("INSERT INTO reminders (user_id, activity, time) VALUES (?, ?, ?)");
+    stmt.run(user_id || 1, activity, time);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/reminders/:id", (req, res) => {
+    const stmt = db.prepare("DELETE FROM reminders WHERE id = ?");
+    stmt.run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.patch("/api/reminders/:id", (req, res) => {
+    const { completed } = req.body;
+    const stmt = db.prepare("UPDATE reminders SET completed = ? WHERE id = ?");
+    stmt.run(completed ? 1 : 0, req.params.id);
+    res.json({ success: true });
+  });
+
   // User Preferences
   app.get("/api/preferences/:user_id", (req, res) => {
     const stmt = db.prepare("SELECT preferences FROM users WHERE id = ?");
@@ -108,7 +187,8 @@ async function startServer() {
         voice: 'Kore',
         language: 'en',
         tone: 'empathetic',
-        backstory: ''
+        backstory: '',
+        isSpeakingEnabled: true
       });
     }
   });

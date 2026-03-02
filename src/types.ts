@@ -24,4 +24,22 @@ export interface UserPreferences {
   language: 'en' | 'sw';
   tone: 'empathetic' | 'professional' | 'cheerful' | 'calm' | 'direct';
   backstory?: string;
+  isSpeakingEnabled: boolean;
+}
+
+export interface SupportContact {
+  id: number;
+  user_id: number;
+  name: string;
+  relation: string;
+  phone: string;
+  email: string;
+}
+
+export interface Reminder {
+  id: number;
+  user_id: number;
+  activity: string;
+  time: string;
+  completed: number;
 }
