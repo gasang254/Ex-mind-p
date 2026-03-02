@@ -1,0 +1,7 @@
+{
+  "name": "Ex-Mind: AI Mental Health Companion",
+  "description": "An AI-powered mental wellness platform providing personalized, proactive, and clinically informed support with voice-adaptive companionship and crisis detection.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
