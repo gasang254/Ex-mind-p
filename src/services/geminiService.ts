@@ -7,7 +7,8 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 export function getSystemInstruction(
   preferences?: UserPreferences,
   recentMoods?: MoodLog[],
-  recentJournal?: JournalEntry[]
+  recentJournal?: JournalEntry[],
+  historySummary?: string
 ) {
   const tone = preferences?.tone || 'empathetic';
   const backstory = preferences?.backstory ? `\n\nYOUR BACKSTORY:\n${preferences.backstory}` : '';
@@ -24,11 +25,13 @@ export function getSystemInstruction(
     userContext += `\nRECENT JOURNAL SENTIMENTS: ${recentSentiments}.`;
   }
 
+  const summarySection = historySummary ? `\n\nCONVERSATION SUMMARY (Older messages):\n${historySummary}` : '';
+
   return `You are Ex-Mind, a compassionate AI mental health companion for Befrienders Kenya. 
 Your goal is to provide proactive, empathetic, and clinically-informed support.
 
 CURRENT TONE: ${tone.toUpperCase()}
-${language}${backstory}${userContext}
+${language}${backstory}${userContext}${summarySection}
 
 CORE PRINCIPLES:
 1. EMPATHY: Always validate the user's feelings. Use a ${tone} tone.
@@ -44,6 +47,22 @@ TOOLS:
 If the user seems to be in a high-risk crisis, your response MUST include a clear escalation path to human support.`;
 }
 
+async function summarizeHistory(history: { role: string; content: string }[]) {
+  if (history.length < 5) return "";
+  
+  const textToSummarize = history.map(h => `${h.role}: ${h.content}`).join('\n');
+  
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Summarize the following conversation history between a user and a mental health companion in 2-3 sentences, focusing on the user's emotional state, key topics discussed, and any progress made. This summary will be used to provide context for future messages:\n\n${textToSummarize}`,
+    config: {
+      temperature: 0.3,
+    }
+  });
+  
+  return response.text || "";
+}
+
 export async function getChatResponse(
   message: string, 
   history: { role: string; content: string }[], 
@@ -53,9 +72,18 @@ export async function getChatResponse(
 ) {
   const model = "gemini-3-flash-preview";
   
-  // Ensure history is not too long and roles alternate
-  const slicedHistory = history.slice(-20); // Keep last 20 messages
-  const formattedHistory = slicedHistory.map(h => ({
+  let historySummary = "";
+  let activeHistory = history;
+
+  // If history is long, summarize the older parts to maintain context without hitting token limits
+  // and to help the model focus on the most recent flow.
+  if (history.length > 15) {
+    const olderHistory = history.slice(0, -10);
+    activeHistory = history.slice(-10);
+    historySummary = await summarizeHistory(olderHistory);
+  }
+
+  const formattedHistory = activeHistory.map(h => ({
     role: h.role === 'user' ? 'user' : 'model',
     parts: [{ text: h.content }]
   }));
@@ -67,7 +95,7 @@ export async function getChatResponse(
       { role: 'user', parts: [{ text: message }] }
     ],
     config: {
-      systemInstruction: getSystemInstruction(preferences, recentMoods, recentJournal),
+      systemInstruction: getSystemInstruction(preferences, recentMoods, recentJournal, historySummary),
       temperature: 0.7,
     }
   });

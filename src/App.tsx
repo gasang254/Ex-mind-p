@@ -512,17 +512,34 @@ export default function App() {
 
               <div className="space-y-4">
                 <h3 className="text-xs font-semibold uppercase tracking-widest opacity-40">Past Entries</h3>
-                {journalEntries.map((entry) => (
-                  <div key={entry.id} className="p-4 bg-white border border-brand-cream rounded-2xl shadow-sm">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] text-brand-olive/60">{new Date(entry.timestamp).toLocaleDateString()}</span>
-                      <span className="px-2 py-0.5 bg-brand-cream rounded-full text-[10px] font-medium text-brand-olive uppercase tracking-tighter">
-                        {entry.sentiment}
-                      </span>
+                {journalEntries.map((entry) => {
+                  const sentimentConfig: Record<string, { icon: any, color: string, bg: string }> = {
+                    'Happy': { icon: Smile, color: 'text-green-600', bg: 'bg-green-50' },
+                    'Sad': { icon: Frown, color: 'text-blue-600', bg: 'bg-blue-50' },
+                    'Anxious': { icon: AlertTriangle, color: 'text-orange-600', bg: 'bg-orange-50' },
+                    'Calm': { icon: Heart, color: 'text-teal-600', bg: 'bg-teal-50' },
+                    'Angry': { icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
+                    'Neutral': { icon: Meh, color: 'text-gray-600', bg: 'bg-gray-50' },
+                  };
+                  const config = sentimentConfig[entry.sentiment] || sentimentConfig['Neutral'];
+                  
+                  return (
+                    <div key={entry.id} className="p-5 bg-white border border-brand-cream rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-[10px] font-medium text-brand-olive/40 uppercase tracking-widest">
+                          {new Date(entry.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full ${config.bg} ${config.color} border border-current/10`}>
+                          <config.icon size={12} />
+                          <span className="text-[10px] font-bold uppercase tracking-tighter">
+                            {entry.sentiment}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-sm text-brand-ink/80 leading-relaxed">{entry.content}</p>
                     </div>
-                    <p className="text-sm text-brand-ink/80 line-clamp-2">{entry.content}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </motion.div>
           )}
