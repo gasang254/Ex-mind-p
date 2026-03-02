@@ -1,19 +1,34 @@
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 
-import { UserPreferences } from "../types";
+import { UserPreferences, MoodLog, JournalEntry } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-export function getSystemInstruction(preferences?: UserPreferences) {
+export function getSystemInstruction(
+  preferences?: UserPreferences,
+  recentMoods?: MoodLog[],
+  recentJournal?: JournalEntry[]
+) {
   const tone = preferences?.tone || 'empathetic';
   const backstory = preferences?.backstory ? `\n\nYOUR BACKSTORY:\n${preferences.backstory}` : '';
   const language = preferences?.language === 'sw' ? 'You should primarily respond in Kiswahili, but understand English.' : 'You can speak English and Kiswahili.';
+
+  // Create a summary of recent mood and journal activity for context
+  let userContext = '';
+  if (recentMoods && recentMoods.length > 0) {
+    const avgMood = recentMoods.slice(0, 5).reduce((acc, m) => acc + m.mood, 0) / Math.min(recentMoods.length, 5);
+    userContext += `\nRECENT MOOD: The user's average mood lately has been ${avgMood.toFixed(1)}/5.`;
+  }
+  if (recentJournal && recentJournal.length > 0) {
+    const recentSentiments = recentJournal.slice(0, 3).map(j => j.sentiment).join(', ');
+    userContext += `\nRECENT JOURNAL SENTIMENTS: ${recentSentiments}.`;
+  }
 
   return `You are Ex-Mind, a compassionate AI mental health companion for Befrienders Kenya. 
 Your goal is to provide proactive, empathetic, and clinically-informed support.
 
 CURRENT TONE: ${tone.toUpperCase()}
-${language}${backstory}
+${language}${backstory}${userContext}
 
 CORE PRINCIPLES:
 1. EMPATHY: Always validate the user's feelings. Use a ${tone} tone.
@@ -29,10 +44,18 @@ TOOLS:
 If the user seems to be in a high-risk crisis, your response MUST include a clear escalation path to human support.`;
 }
 
-export async function getChatResponse(message: string, history: { role: string; content: string }[], preferences?: UserPreferences) {
+export async function getChatResponse(
+  message: string, 
+  history: { role: string; content: string }[], 
+  preferences?: UserPreferences,
+  recentMoods?: MoodLog[],
+  recentJournal?: JournalEntry[]
+) {
   const model = "gemini-3-flash-preview";
   
-  const formattedHistory = history.map(h => ({
+  // Ensure history is not too long and roles alternate
+  const slicedHistory = history.slice(-20); // Keep last 20 messages
+  const formattedHistory = slicedHistory.map(h => ({
     role: h.role === 'user' ? 'user' : 'model',
     parts: [{ text: h.content }]
   }));
@@ -44,7 +67,7 @@ export async function getChatResponse(message: string, history: { role: string; 
       { role: 'user', parts: [{ text: message }] }
     ],
     config: {
-      systemInstruction: getSystemInstruction(preferences),
+      systemInstruction: getSystemInstruction(preferences, recentMoods, recentJournal),
       temperature: 0.7,
     }
   });

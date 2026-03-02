@@ -31,6 +31,27 @@ const MOODS = [
   { value: 5, icon: Sun, label: 'Great', color: 'text-blue-500' },
 ];
 
+const Waveform = () => (
+  <div className="flex items-center justify-center gap-1.5 h-10 px-4">
+    {[...Array(6)].map((_, i) => (
+      <motion.div
+        key={i}
+        className="w-1.5 bg-red-500 rounded-full"
+        animate={{
+          height: [10, 30, 10],
+          opacity: [0.5, 1, 0.5]
+        }}
+        transition={{
+          duration: 0.8,
+          repeat: Infinity,
+          delay: i * 0.12,
+          ease: "easeInOut"
+        }}
+      />
+    ))}
+  </div>
+);
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'journal' | 'toolbox' | 'settings'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -106,7 +127,7 @@ export default function App() {
         body: JSON.stringify({ user_id: 1, ...userMessage })
       });
 
-      const responseText = await getChatResponse(input, messages, preferences);
+      const responseText = await getChatResponse(input, messages, preferences, moodLogs, journalEntries);
       const aiMessage: ChatMessage = { role: 'model', content: responseText || 'I am here for you.' };
       
       setMessages(prev => [...prev, aiMessage]);
@@ -415,13 +436,42 @@ export default function App() {
 
       {/* Input Area (Chat Only) */}
       {activeTab === 'chat' && (
-        <div className="p-4 border-t border-brand-cream bg-white">
+        <div className="p-4 border-t border-brand-cream bg-white relative">
+          <AnimatePresence>
+            {isRecording && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="absolute -top-14 left-0 right-0 flex justify-center pointer-events-none"
+              >
+                <div className="bg-white/90 backdrop-blur-sm border border-red-100 px-6 py-2 rounded-full shadow-lg flex items-center gap-3">
+                  <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest animate-pulse">Listening</span>
+                  <Waveform />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          
           <form onSubmit={handleSendMessage} className="flex items-center gap-2">
             <button 
               type="button"
               onClick={() => setIsRecording(!isRecording)}
-              className={`p-3 rounded-full transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-brand-cream text-brand-olive'}`}
+              className={`p-3 rounded-full transition-all relative ${
+                isRecording 
+                  ? 'bg-red-500 text-white shadow-lg shadow-red-200' 
+                  : 'bg-brand-cream text-brand-olive hover:bg-brand-cream/80'
+              }`}
             >
+              {isRecording && (
+                <motion.div 
+                  layoutId="recording-ring"
+                  className="absolute inset-0 rounded-full border-2 border-red-500"
+                  initial={{ scale: 1, opacity: 0.5 }}
+                  animate={{ scale: 1.5, opacity: 0 }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
+                />
+              )}
               {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
             <input 
