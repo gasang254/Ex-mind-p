@@ -1,6 +1,6 @@
 export interface MoodLog {
   id: number;
-  user_id: number;
+  user_id: string | number;
   mood: number;
   note: string;
   timestamp: string;
@@ -8,7 +8,7 @@ export interface MoodLog {
 
 export interface JournalEntry {
   id: number;
-  user_id: number;
+  user_id: string | number;
   content: string;
   sentiment: string;
   timestamp: string;
@@ -32,7 +32,7 @@ export interface UserPreferences {
 
 export interface SupportContact {
   id: number;
-  user_id: number;
+  user_id: string | number;
   name: string;
   relation: string;
   phone: string;
@@ -41,7 +41,7 @@ export interface SupportContact {
 
 export interface Reminder {
   id: number;
-  user_id: number;
+  user_id: string | number;
   activity: string;
   time: string;
   completed: number;
@@ -49,7 +49,7 @@ export interface Reminder {
 
 export interface Session {
   id: number;
-  user_id: number;
+  user_id: string | number;
   volunteer_id?: number;
   type: 'chat' | 'voice' | 'video';
   status: 'scheduled' | 'completed' | 'cancelled';
@@ -59,8 +59,8 @@ export interface Session {
 }
 
 export interface UserProfile {
-  id: number;
+  id: string | number;
   email: string;
   name: string;
-  profile_picture?: string;
+  profile_picture?: string | null;
 }

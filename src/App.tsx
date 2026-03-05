@@ -58,6 +58,15 @@ import {
   Activity,
   BarChart3
 } from 'lucide-react';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  onAuthStateChanged, 
+  signOut, 
+  updateProfile,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { auth } from './lib/firebase';
 import { getChatResponse, analyzeMood, generateSpeech, detectCrisisIntent } from './services/geminiService';
 import { MoodLog, JournalEntry, ChatMessage, UserPreferences, SupportContact, Reminder, Session, UserProfile } from './types';
 
@@ -90,7 +99,7 @@ const Waveform = () => (
   </div>
 );
 
-const Login = ({ onLogin }: { onLogin: (user: UserProfile) => void }) => {
+const Login = ({ onLogin }: { onLogin: (user: FirebaseUser) => void }) => {
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -103,29 +112,44 @@ const Login = ({ onLogin }: { onLogin: (user: UserProfile) => void }) => {
     setError('');
     setLoading(true);
 
-    const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
-    const body = isRegistering ? { email, password, name } : { email, password };
-
     try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await res.json();
+      if (isRegistering) {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCredential.user, { displayName: name });
+        
+        // Sync with local DB
+        await fetch('/api/auth/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uid: userCredential.user.uid,
+            email: userCredential.user.email,
+            name: name,
+            profile_picture: null
+          })
+        });
 
-      if (res.ok) {
-        if (isRegistering) {
-          setIsRegistering(false);
-          setError('Registration successful! Please login.');
-        } else {
-          onLogin(data.user);
-        }
+        onLogin(userCredential.user);
       } else {
-        setError(data.error || 'Something went wrong');
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        
+        // Sync with local DB (ensure user exists in local DB)
+        await fetch('/api/auth/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uid: userCredential.user.uid,
+            email: userCredential.user.email,
+            name: userCredential.user.displayName,
+            profile_picture: userCredential.user.photoURL
+          })
+        });
+
+        onLogin(userCredential.user);
       }
-    } catch (err) {
-      setError('Failed to connect to server');
+    } catch (err: any) {
+      console.error("Auth error:", err);
+      setError(err.message || 'Authentication failed');
     } finally {
       setLoading(false);
     }
@@ -597,6 +621,17 @@ export default function App() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Helper for authenticated fetch
+  const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
+    const idToken = await auth.currentUser?.getIdToken();
+    const headers = {
+      ...options.headers,
+      'Authorization': `Bearer ${idToken}`,
+      'Content-Type': 'application/json'
+    };
+    return fetch(url, { ...options, headers });
+  };
+
   // Auto-save journal draft
   useEffect(() => {
     const savedDraft = localStorage.getItem('journal_draft');
@@ -604,29 +639,46 @@ export default function App() {
       setJournalInput(savedDraft);
     }
 
-    // Check for existing session
-    const savedUser = localStorage.getItem('exmind_user');
-    if (savedUser) {
-      try {
-        const parsedUser = JSON.parse(savedUser);
-        setUser(parsedUser);
+    // Firebase Auth Listener
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        const mappedUser: UserProfile = {
+          id: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          name: firebaseUser.displayName || 'User',
+          profile_picture: firebaseUser.photoURL
+        };
+        setUser(mappedUser);
         setIsLoggedIn(true);
-      } catch (e) {
-        console.error("Failed to parse saved user", e);
+      } else {
+        setUser(null);
+        setIsLoggedIn(false);
       }
-    }
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const handleLogin = (loggedInUser: UserProfile) => {
-    setUser(loggedInUser);
+  const handleLogin = (loggedInUser: FirebaseUser) => {
+    const mappedUser: UserProfile = {
+      id: loggedInUser.uid,
+      email: loggedInUser.email || '',
+      name: loggedInUser.displayName || 'User',
+      profile_picture: loggedInUser.photoURL
+    };
+    setUser(mappedUser);
     setIsLoggedIn(true);
-    localStorage.setItem('exmind_user', JSON.stringify(loggedInUser));
   };
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setUser(null);
-    localStorage.removeItem('exmind_user');
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      setIsLoggedIn(false);
+      setActiveTab('chat');
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   // Debounced save (saves 2s after typing stops)
@@ -695,14 +747,14 @@ export default function App() {
     if (!user) return;
     try {
       const [moodRes, journalRes, chatRes, prefRes, supportRes, reminderRes, userRes, sessionRes] = await Promise.all([
-        fetch(`/api/mood/${user.id}`),
-        fetch(`/api/journal/${user.id}`),
-        fetch(`/api/chat/${user.id}`),
-        fetch(`/api/preferences/${user.id}`),
-        fetch(`/api/support/${user.id}`),
-        fetch(`/api/reminders/${user.id}`),
-        fetch(`/api/user/${user.id}`),
-        fetch(`/api/sessions/${user.id}`)
+        fetchWithAuth(`/api/mood/${user.id}`),
+        fetchWithAuth(`/api/journal/${user.id}`),
+        fetchWithAuth(`/api/chat/${user.id}`),
+        fetchWithAuth(`/api/preferences/${user.id}`),
+        fetchWithAuth(`/api/support/${user.id}`),
+        fetchWithAuth(`/api/reminders/${user.id}`),
+        fetchWithAuth(`/api/user/${user.id}`),
+        fetchWithAuth(`/api/sessions/${user.id}`)
       ]);
       
       if (moodRes.ok) setMoodLogs(await moodRes.json());
@@ -736,9 +788,8 @@ export default function App() {
     };
 
     try {
-      await fetch('/api/sessions', {
+      await fetchWithAuth('/api/sessions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newSession)
       });
       fetchData();
@@ -751,7 +802,7 @@ export default function App() {
 
   const handleCancelSession = async (id: number) => {
     try {
-      await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+      await fetchWithAuth(`/api/sessions/${id}`, { method: 'DELETE' });
       fetchData();
     } catch (error) {
       console.error('Error cancelling session:', error);
@@ -893,10 +944,12 @@ export default function App() {
     };
 
     try {
-      await fetch('/api/user', {
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { displayName: updatedProfile.name });
+      }
+      await fetchWithAuth('/api/user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, ...updatedProfile })
+        body: JSON.stringify(updatedProfile)
       });
       setUserProfile(updatedProfile);
     } catch (error) {
@@ -914,10 +967,9 @@ export default function App() {
       const updatedProfile = { ...userProfile, profile_picture: base64String };
       
       try {
-        await fetch('/api/user', {
+        await fetchWithAuth('/api/user', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: user.id, ...updatedProfile })
+          body: JSON.stringify(updatedProfile)
         });
         setUserProfile(updatedProfile);
       } catch (error) {
@@ -930,10 +982,9 @@ export default function App() {
   const handleRequestVolunteer = async () => {
     if (!user) return;
     try {
-      await fetch('/api/volunteer-request', {
+      await fetchWithAuth('/api/volunteer-request', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id })
+        body: JSON.stringify({})
       });
       alert("A Befrienders volunteer has been notified and will reach out to you soon.");
     } catch (error) {
@@ -953,10 +1004,9 @@ export default function App() {
     };
 
     try {
-      await fetch('/api/support', {
+      await fetchWithAuth('/api/support', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, ...contact })
+        body: JSON.stringify(contact)
       });
       fetchData();
       (e.target as HTMLFormElement).reset();
@@ -967,7 +1017,7 @@ export default function App() {
 
   const handleDeleteContact = async (id: number) => {
     try {
-      await fetch(`/api/support/${id}`, { method: 'DELETE' });
+      await fetchWithAuth(`/api/support/${id}`, { method: 'DELETE' });
       fetchData();
     } catch (error) {
       console.error('Error deleting contact:', error);
@@ -984,10 +1034,9 @@ export default function App() {
     };
 
     try {
-      await fetch('/api/reminders', {
+      await fetchWithAuth('/api/reminders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, ...reminder })
+        body: JSON.stringify(reminder)
       });
       fetchData();
       (e.target as HTMLFormElement).reset();
@@ -998,7 +1047,7 @@ export default function App() {
 
   const handleDeleteReminder = async (id: number) => {
     try {
-      await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
+      await fetchWithAuth(`/api/reminders/${id}`, { method: 'DELETE' });
       fetchData();
     } catch (error) {
       console.error('Error deleting reminder:', error);
@@ -1007,9 +1056,8 @@ export default function App() {
 
   const handleToggleReminder = async (id: number, completed: boolean) => {
     try {
-      await fetch(`/api/reminders/${id}`, {
+      await fetchWithAuth(`/api/reminders/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ completed })
       });
       fetchData();
@@ -1069,10 +1117,9 @@ export default function App() {
   const savePreferences = async (newPrefs: UserPreferences) => {
     if (!user) return;
     try {
-      await fetch('/api/preferences', {
+      await fetchWithAuth('/api/preferences', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, preferences: newPrefs })
+        body: JSON.stringify({ preferences: newPrefs })
       });
     } catch (error) {
       console.error('Error saving preferences:', error);
@@ -1096,10 +1143,9 @@ export default function App() {
 
     try {
       // Save user message
-      await fetch('/api/chat', {
+      await fetchWithAuth('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, ...userMessage })
+        body: JSON.stringify({ ...userMessage })
       });
 
       const responseText = await getChatResponse(input, messages, preferences, moodLogs, journalEntries, isCrisisDetected);
@@ -1108,10 +1154,9 @@ export default function App() {
       setMessages(prev => [...prev, aiMessage]);
       
       // Save AI message
-      await fetch('/api/chat', {
+      await fetchWithAuth('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, ...aiMessage })
+        body: JSON.stringify({ ...aiMessage })
       });
 
       // Speak if enabled
@@ -1133,10 +1178,9 @@ export default function App() {
   const handleMoodSubmit = async (mood: number) => {
     if (!user) return;
     try {
-      await fetch('/api/mood', {
+      await fetchWithAuth('/api/mood', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, mood, note: '' })
+        body: JSON.stringify({ mood, note: '' })
       });
       setShowMoodPicker(false);
       fetchData();
@@ -1154,10 +1198,9 @@ export default function App() {
     
     try {
       const sentiment = await analyzeMood(content);
-      await fetch('/api/journal', {
+      await fetchWithAuth('/api/journal', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, content, sentiment })
+        body: JSON.stringify({ content, sentiment })
       });
       localStorage.removeItem('journal_draft');
       setLastSaved(null);
