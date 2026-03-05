@@ -187,6 +187,34 @@ export async function analyzeMood(journalContent: string) {
   }
 }
 
+export async function detectCrisisIntent(text: string) {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Analyze the following user input for signs of a mental health crisis, self-harm, or suicidal ideation. 
+    Return a JSON object with a boolean 'isCrisis' and a string 'reason' explaining why.
+    
+    User input: "${text}"`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          isCrisis: { type: Type.BOOLEAN },
+          reason: { type: Type.STRING }
+        },
+        required: ["isCrisis", "reason"]
+      }
+    }
+  });
+
+  try {
+    const data = JSON.parse(response.text || '{"isCrisis": false, "reason": "No crisis detected"}');
+    return data as { isCrisis: boolean; reason: string };
+  } catch (e) {
+    return { isCrisis: false, reason: "Error parsing crisis detection" };
+  }
+}
+
 export async function generateSpeech(text: string, voiceName: 'Kore' | 'Puck' | 'Charon' | 'Fenrir' | 'Zephyr' = 'Kore') {
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-preview-tts",

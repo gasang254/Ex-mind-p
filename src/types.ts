@@ -46,3 +46,21 @@ export interface Reminder {
   time: string;
   completed: number;
 }
+
+export interface Session {
+  id: number;
+  user_id: number;
+  volunteer_id?: number;
+  type: 'chat' | 'voice' | 'video';
+  status: 'scheduled' | 'completed' | 'cancelled';
+  scheduled_at: string;
+  notes?: string;
+  timestamp: string;
+}
+
+export interface UserProfile {
+  id: number;
+  email: string;
+  name: string;
+  profile_picture?: string;
+}

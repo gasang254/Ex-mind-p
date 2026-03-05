@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import bcrypt from "bcryptjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,9 +15,21 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE,
+    password TEXT,
     name TEXT,
     profile_picture TEXT,
     preferences TEXT -- JSON string for AI tone, gender, language
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    volunteer_id INTEGER,
+    type TEXT, -- 'chat', 'voice', 'video'
+    status TEXT DEFAULT 'scheduled', -- 'scheduled', 'completed', 'cancelled'
+    scheduled_at DATETIME,
+    notes TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS mood_logs (
@@ -76,6 +89,11 @@ try {
     db.exec("ALTER TABLE users ADD COLUMN profile_picture TEXT");
     console.log("Migration: Added profile_picture column to users table");
   }
+  const hasPassword = tableInfo.some(col => col.name === 'password');
+  if (!hasPassword) {
+    db.exec("ALTER TABLE users ADD COLUMN password TEXT");
+    console.log("Migration: Added password column to users table");
+  }
 } catch (e) {
   console.error("Migration error:", e);
 }
@@ -89,6 +107,41 @@ async function startServer() {
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  // Auth
+  app.post("/api/auth/register", async (req, res) => {
+    const { email, password, name } = req.body;
+    try {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const stmt = db.prepare("INSERT INTO users (email, password, name) VALUES (?, ?, ?)");
+      const result = stmt.run(email, hashedPassword, name);
+      res.json({ success: true, user_id: result.lastInsertRowid });
+    } catch (error: any) {
+      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        res.status(400).json({ error: "Email already exists" });
+      } else {
+        res.status(500).json({ error: "Internal server error" });
+      }
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    const { email, password } = req.body;
+    const stmt = db.prepare("SELECT * FROM users WHERE email = ?");
+    const user = stmt.get(email) as any;
+
+    if (!user) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const { password: _, ...userWithoutPassword } = user;
+    res.json({ success: true, user: userWithoutPassword });
   });
 
   // Mood Logs
@@ -185,6 +238,26 @@ async function startServer() {
     const { completed } = req.body;
     const stmt = db.prepare("UPDATE reminders SET completed = ? WHERE id = ?");
     stmt.run(completed ? 1 : 0, req.params.id);
+    res.json({ success: true });
+  });
+
+  // Sessions
+  app.get("/api/sessions/:user_id", (req, res) => {
+    const stmt = db.prepare("SELECT * FROM sessions WHERE user_id = ? ORDER BY scheduled_at ASC");
+    const sessions = stmt.all(req.params.user_id);
+    res.json(sessions);
+  });
+
+  app.post("/api/sessions", (req, res) => {
+    const { user_id, type, scheduled_at, notes } = req.body;
+    const stmt = db.prepare("INSERT INTO sessions (user_id, type, scheduled_at, notes) VALUES (?, ?, ?, ?)");
+    stmt.run(user_id || 1, type, scheduled_at, notes);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/sessions/:id", (req, res) => {
+    const stmt = db.prepare("DELETE FROM sessions WHERE id = ?");
+    stmt.run(req.params.id);
     res.json({ success: true });
   });
 

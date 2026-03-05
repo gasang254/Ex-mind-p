@@ -55,10 +55,11 @@ import {
   Zap,
   Leaf,
   TrendingUp,
-  Activity
+  Activity,
+  BarChart3
 } from 'lucide-react';
-import { getChatResponse, analyzeMood, generateSpeech } from './services/geminiService';
-import { MoodLog, JournalEntry, ChatMessage, UserPreferences, SupportContact, Reminder } from './types';
+import { getChatResponse, analyzeMood, generateSpeech, detectCrisisIntent } from './services/geminiService';
+import { MoodLog, JournalEntry, ChatMessage, UserPreferences, SupportContact, Reminder, Session, UserProfile } from './types';
 
 const MOODS = [
   { value: 1, icon: Frown, label: 'Struggling', color: 'text-red-500' },
@@ -88,6 +89,125 @@ const Waveform = () => (
     ))}
   </div>
 );
+
+const Login = ({ onLogin }: { onLogin: (user: UserProfile) => void }) => {
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
+    const body = isRegistering ? { email, password, name } : { email, password };
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        if (isRegistering) {
+          setIsRegistering(false);
+          setError('Registration successful! Please login.');
+        } else {
+          onLogin(data.user);
+        }
+      } else {
+        setError(data.error || 'Something went wrong');
+      }
+    } catch (err) {
+      setError('Failed to connect to server');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-brand-bg flex items-center justify-center p-6">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md bg-white rounded-[40px] p-10 shadow-xl border border-brand-cream"
+      >
+        <div className="text-center mb-10">
+          <div className="w-16 h-16 bg-brand-olive/10 rounded-3xl flex items-center justify-center mx-auto mb-4">
+            <Heart size={32} className="text-brand-olive" fill="currentColor" />
+          </div>
+          <h1 className="serif text-3xl text-brand-olive">Ex-Mind</h1>
+          <p className="text-xs opacity-50 uppercase tracking-widest mt-2">
+            {isRegistering ? 'Create your account' : 'Welcome back'}
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {isRegistering && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-widest opacity-40 ml-1">Full Name</label>
+              <input 
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full text-sm p-4 bg-brand-cream/30 border border-brand-cream rounded-2xl outline-none focus:ring-2 focus:ring-brand-olive/20"
+                placeholder="John Doe"
+                required
+              />
+            </div>
+          )}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-widest opacity-40 ml-1">Email Address</label>
+            <input 
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full text-sm p-4 bg-brand-cream/30 border border-brand-cream rounded-2xl outline-none focus:ring-2 focus:ring-brand-olive/20"
+              placeholder="your@email.com"
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-widest opacity-40 ml-1">Password</label>
+            <input 
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full text-sm p-4 bg-brand-cream/30 border border-brand-cream rounded-2xl outline-none focus:ring-2 focus:ring-brand-olive/20"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+
+          {error && <p className="text-xs text-red-500 text-center">{error}</p>}
+
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full p-4 bg-brand-olive text-white rounded-2xl font-bold uppercase tracking-widest text-xs shadow-lg shadow-brand-olive/20 hover:bg-brand-olive/90 transition-all disabled:opacity-50"
+          >
+            {loading ? 'Processing...' : (isRegistering ? 'Register' : 'Login')}
+          </button>
+        </form>
+
+        <div className="mt-8 text-center">
+          <button 
+            onClick={() => setIsRegistering(!isRegistering)}
+            className="text-xs font-bold text-brand-olive uppercase tracking-widest hover:underline"
+          >
+            {isRegistering ? 'Already have an account? Login' : 'New here? Create account'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
 
 const MindfulnessExercise = ({ onClose, isTab = false }: { onClose: () => void, isTab?: boolean }) => {
   const [activeExercise, setActiveExercise] = useState<number | null>(null);
@@ -346,8 +466,100 @@ const MindfulnessExercise = ({ onClose, isTab = false }: { onClose: () => void, 
   );
 };
 
+const Sessions = ({ sessions, onBook, onCancel }: { sessions: Session[], onBook: (e: React.FormEvent<HTMLFormElement>) => void, onCancel: (id: number) => void }) => {
+  return (
+    <div className="flex flex-col gap-8">
+      <div className="bg-white rounded-[40px] p-8 shadow-sm border border-brand-cream">
+        <h2 className="serif text-2xl text-brand-olive mb-6">Book a Session</h2>
+        <form onSubmit={onBook} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-widest opacity-40 ml-1">Session Type</label>
+            <select 
+              name="type"
+              className="w-full text-sm p-4 bg-brand-cream/30 border border-brand-cream rounded-2xl outline-none focus:ring-2 focus:ring-brand-olive/20"
+              required
+            >
+              <option value="chat">Chat Session</option>
+              <option value="voice">Voice Call</option>
+              <option value="video">Video Session</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-widest opacity-40 ml-1">Date & Time</label>
+            <input 
+              type="datetime-local"
+              name="scheduled_at"
+              className="w-full text-sm p-4 bg-brand-cream/30 border border-brand-cream rounded-2xl outline-none focus:ring-2 focus:ring-brand-olive/20"
+              required
+            />
+          </div>
+          <div className="md:col-span-2 space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-widest opacity-40 ml-1">Notes (Optional)</label>
+            <textarea 
+              name="notes"
+              className="w-full text-sm p-4 bg-brand-cream/30 border border-brand-cream rounded-2xl outline-none focus:ring-2 focus:ring-brand-olive/20 min-h-[100px]"
+              placeholder="Anything you'd like to discuss?"
+            />
+          </div>
+          <button 
+            type="submit"
+            className="md:col-span-2 p-4 bg-brand-olive text-white rounded-2xl font-bold uppercase tracking-widest text-xs shadow-lg shadow-brand-olive/20 hover:bg-brand-olive/90 transition-all"
+          >
+            Book Session
+          </button>
+        </form>
+      </div>
+
+      <div className="bg-white rounded-[40px] p-8 shadow-sm border border-brand-cream">
+        <h2 className="serif text-2xl text-brand-olive mb-6">Upcoming Sessions</h2>
+        <div className="space-y-4">
+          {sessions.length === 0 ? (
+            <p className="text-sm opacity-50 text-center py-8 italic">No upcoming sessions booked.</p>
+          ) : (
+            sessions.map((session) => (
+              <div key={session.id} className="flex items-center justify-between p-6 bg-brand-cream/20 border border-brand-cream rounded-3xl">
+                <div className="flex items-center gap-4">
+                  <div className={`p-3 rounded-2xl ${
+                    session.type === 'chat' ? 'bg-blue-100 text-blue-600' : 
+                    session.type === 'voice' ? 'bg-green-100 text-green-600' : 
+                    'bg-purple-100 text-purple-600'
+                  }`}>
+                    {session.type === 'chat' ? <MessageCircle size={20} /> : 
+                     session.type === 'voice' ? <Phone size={20} /> : 
+                     <Calendar size={20} />}
+                  </div>
+                  <div>
+                    <h3 className="font-medium capitalize">{session.type} Session</h3>
+                    <p className="text-xs opacity-50">{new Date(session.scheduled_at).toLocaleString()}</p>
+                    {session.notes && <p className="text-xs mt-1 italic">"{session.notes}"</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full ${
+                    session.status === 'scheduled' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'
+                  }`}>
+                    {session.status}
+                  </span>
+                  <button 
+                    onClick={() => onCancel(session.id!)}
+                    className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'journal' | 'progress' | 'mindfulness' | 'toolbox' | 'settings'>('chat');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [activeTab, setActiveTab] = useState<'chat' | 'journal' | 'progress' | 'mindfulness' | 'toolbox' | 'settings' | 'sessions'>('chat');
   const [settingsTab, setSettingsTab] = useState<'profile' | 'persona' | 'notifications' | 'appearance'>('profile');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -359,6 +571,7 @@ export default function App() {
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [supportContacts, setSupportContacts] = useState<SupportContact[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [showMoodPicker, setShowMoodPicker] = useState(true);
   const [isRecordingChat, setIsRecordingChat] = useState(false);
   const [isRecordingJournal, setIsRecordingJournal] = useState(false);
@@ -390,7 +603,31 @@ export default function App() {
     if (savedDraft) {
       setJournalInput(savedDraft);
     }
+
+    // Check for existing session
+    const savedUser = localStorage.getItem('exmind_user');
+    if (savedUser) {
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        setUser(parsedUser);
+        setIsLoggedIn(true);
+      } catch (e) {
+        console.error("Failed to parse saved user", e);
+      }
+    }
   }, []);
+
+  const handleLogin = (loggedInUser: UserProfile) => {
+    setUser(loggedInUser);
+    setIsLoggedIn(true);
+    localStorage.setItem('exmind_user', JSON.stringify(loggedInUser));
+  };
+
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    setUser(null);
+    localStorage.removeItem('exmind_user');
+  };
 
   // Debounced save (saves 2s after typing stops)
   useEffect(() => {
@@ -418,10 +655,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [journalInput]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -459,15 +692,17 @@ export default function App() {
   };
 
   const fetchData = async () => {
+    if (!user) return;
     try {
-      const [moodRes, journalRes, chatRes, prefRes, supportRes, reminderRes, userRes] = await Promise.all([
-        fetch('/api/mood/1'),
-        fetch('/api/journal/1'),
-        fetch('/api/chat/1'),
-        fetch('/api/preferences/1'),
-        fetch('/api/support/1'),
-        fetch('/api/reminders/1'),
-        fetch('/api/user/1')
+      const [moodRes, journalRes, chatRes, prefRes, supportRes, reminderRes, userRes, sessionRes] = await Promise.all([
+        fetch(`/api/mood/${user.id}`),
+        fetch(`/api/journal/${user.id}`),
+        fetch(`/api/chat/${user.id}`),
+        fetch(`/api/preferences/${user.id}`),
+        fetch(`/api/support/${user.id}`),
+        fetch(`/api/reminders/${user.id}`),
+        fetch(`/api/user/${user.id}`),
+        fetch(`/api/sessions/${user.id}`)
       ]);
       
       if (moodRes.ok) setMoodLogs(await moodRes.json());
@@ -477,8 +712,49 @@ export default function App() {
       if (supportRes.ok) setSupportContacts(await supportRes.json());
       if (reminderRes.ok) setReminders(await reminderRes.json());
       if (userRes.ok) setUserProfile(await userRes.json());
+      if (sessionRes.ok) setSessions(await sessionRes.json());
     } catch (error) {
       console.error('Error fetching data:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      fetchData();
+    }
+  }, [isLoggedIn]);
+
+  const handleBookSession = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user) return;
+    const formData = new FormData(e.currentTarget);
+    const newSession = {
+      user_id: user.id,
+      type: formData.get('type') as string,
+      scheduled_at: formData.get('scheduled_at') as string,
+      notes: formData.get('notes') as string,
+    };
+
+    try {
+      await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSession)
+      });
+      fetchData();
+      (e.target as HTMLFormElement).reset();
+      alert('Session booked successfully!');
+    } catch (error) {
+      console.error('Error booking session:', error);
+    }
+  };
+
+  const handleCancelSession = async (id: number) => {
+    try {
+      await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+      fetchData();
+    } catch (error) {
+      console.error('Error cancelling session:', error);
     }
   };
 
@@ -496,6 +772,42 @@ export default function App() {
     'Angry': '#EF4444',
     'Neutral': '#6B7280',
   };
+
+  const SENTIMENT_VALUES: Record<string, number> = {
+    'Happy': 5,
+    'Calm': 4,
+    'Neutral': 3,
+    'Anxious': 2,
+    'Sad': 1,
+    'Angry': 1,
+  };
+
+  const getWeeklyStats = () => {
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+    const thisWeekMoods = moodLogs.filter(m => new Date(m.timestamp) >= oneWeekAgo);
+    const lastWeekMoods = moodLogs.filter(m => {
+      const d = new Date(m.timestamp);
+      return d >= twoWeeksAgo && d < oneWeekAgo;
+    });
+
+    const thisWeekAvg = thisWeekMoods.length > 0 
+      ? thisWeekMoods.reduce((acc, m) => acc + m.mood, 0) / thisWeekMoods.length 
+      : 0;
+    const lastWeekAvg = lastWeekMoods.length > 0 
+      ? lastWeekMoods.reduce((acc, m) => acc + m.mood, 0) / lastWeekMoods.length 
+      : 0;
+
+    return {
+      thisWeekAvg,
+      lastWeekAvg,
+      improvement: lastWeekAvg > 0 ? ((thisWeekAvg - lastWeekAvg) / lastWeekAvg) * 100 : 0
+    };
+  };
+
+  const weeklyStats = getWeeklyStats();
 
   const calculateStreak = () => {
     const allDates = [
@@ -543,20 +855,36 @@ export default function App() {
 
   const streak = calculateStreak();
 
-  const detectCrisis = (text: string) => {
+  const detectCrisis = async (text: string) => {
     const crisisKeywords = [
       'suicide', 'kill myself', 'end my life', 'end it all', 'self harm', 
       'hurt myself', 'want to die', 'dying', 'hopeless', 'worthless', 
       'give up', 'no reason to live', 'better off dead', 'suicidal',
-      'hurt me', 'kill me', 'end me', 'goodbye world', 'final goodbye'
+      'hurt me', 'kill me', 'end me', 'goodbye world', 'final goodbye',
+      'overdose', 'cut myself', 'hanging myself', 'jump off', 'bridge',
+      'no point', 'everything is dark', 'cannot go on', 'can\'t go on',
+      'suffocating', 'trapped', 'never get better', 'hate my life',
+      'wish i was never born', 'don\'t want to wake up', 'sleep forever'
     ];
     
     const lowerText = text.toLowerCase();
-    return crisisKeywords.some(keyword => lowerText.includes(keyword));
+    const hasKeyword = crisisKeywords.some(keyword => lowerText.includes(keyword));
+    
+    if (hasKeyword) return true;
+
+    // If no keyword, use sophisticated intent detection
+    try {
+      const { isCrisis } = await detectCrisisIntent(text);
+      return isCrisis;
+    } catch (e) {
+      console.error('Crisis intent detection failed:', e);
+      return false;
+    }
   };
 
   const handleUpdateProfile = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!user) return;
     const formData = new FormData(e.currentTarget);
     const updatedProfile = {
       ...userProfile,
@@ -568,7 +896,7 @@ export default function App() {
       await fetch('/api/user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, ...updatedProfile })
+        body: JSON.stringify({ user_id: user.id, ...updatedProfile })
       });
       setUserProfile(updatedProfile);
     } catch (error) {
@@ -578,7 +906,7 @@ export default function App() {
 
   const handleProfilePictureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !user) return;
 
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -589,7 +917,7 @@ export default function App() {
         await fetch('/api/user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: 1, ...updatedProfile })
+          body: JSON.stringify({ user_id: user.id, ...updatedProfile })
         });
         setUserProfile(updatedProfile);
       } catch (error) {
@@ -600,11 +928,12 @@ export default function App() {
   };
 
   const handleRequestVolunteer = async () => {
+    if (!user) return;
     try {
       await fetch('/api/volunteer-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1 })
+        body: JSON.stringify({ user_id: user.id })
       });
       alert("A Befrienders volunteer has been notified and will reach out to you soon.");
     } catch (error) {
@@ -614,6 +943,7 @@ export default function App() {
 
   const handleAddContact = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!user) return;
     const formData = new FormData(e.currentTarget);
     const contact = {
       name: formData.get('name') as string,
@@ -626,7 +956,7 @@ export default function App() {
       await fetch('/api/support', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, ...contact })
+        body: JSON.stringify({ user_id: user.id, ...contact })
       });
       fetchData();
       (e.target as HTMLFormElement).reset();
@@ -646,6 +976,7 @@ export default function App() {
 
   const handleAddReminder = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!user) return;
     const formData = new FormData(e.currentTarget);
     const reminder = {
       activity: formData.get('activity') as string,
@@ -656,7 +987,7 @@ export default function App() {
       await fetch('/api/reminders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, ...reminder })
+        body: JSON.stringify({ user_id: user.id, ...reminder })
       });
       fetchData();
       (e.target as HTMLFormElement).reset();
@@ -736,11 +1067,12 @@ export default function App() {
   };
 
   const savePreferences = async (newPrefs: UserPreferences) => {
+    if (!user) return;
     try {
       await fetch('/api/preferences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, preferences: newPrefs })
+        body: JSON.stringify({ user_id: user.id, preferences: newPrefs })
       });
     } catch (error) {
       console.error('Error saving preferences:', error);
@@ -749,12 +1081,12 @@ export default function App() {
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || !user) return;
 
     const userMessage: ChatMessage = { role: 'user', content: input };
     setMessages(prev => [...prev, userMessage]);
     
-    const isCrisisDetected = detectCrisis(input);
+    const isCrisisDetected = await detectCrisis(input);
     if (isCrisisDetected) {
       setShowCrisisInfo(true);
     }
@@ -767,7 +1099,7 @@ export default function App() {
       await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, ...userMessage })
+        body: JSON.stringify({ user_id: user.id, ...userMessage })
       });
 
       const responseText = await getChatResponse(input, messages, preferences, moodLogs, journalEntries, isCrisisDetected);
@@ -779,7 +1111,7 @@ export default function App() {
       await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, ...aiMessage })
+        body: JSON.stringify({ user_id: user.id, ...aiMessage })
       });
 
       // Speak if enabled
@@ -799,11 +1131,12 @@ export default function App() {
   };
 
   const handleMoodSubmit = async (mood: number) => {
+    if (!user) return;
     try {
       await fetch('/api/mood', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, mood, note: '' })
+        body: JSON.stringify({ user_id: user.id, mood, note: '' })
       });
       setShowMoodPicker(false);
       fetchData();
@@ -813,7 +1146,9 @@ export default function App() {
   };
 
   const handleJournalSubmit = async (content: string) => {
-    if (detectCrisis(content)) {
+    if (!user) return;
+    const isCrisisDetected = await detectCrisis(content);
+    if (isCrisisDetected) {
       setShowCrisisInfo(true);
     }
     
@@ -822,7 +1157,7 @@ export default function App() {
       await fetch('/api/journal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, content, sentiment })
+        body: JSON.stringify({ user_id: user.id, content, sentiment })
       });
       localStorage.removeItem('journal_draft');
       setLastSaved(null);
@@ -838,6 +1173,10 @@ export default function App() {
     setShowGratitude(false);
     setGratitudeEntries(['', '', '']);
   };
+
+  if (!isLoggedIn) {
+    return <Login onLogin={handleLogin} />;
+  }
 
   return (
     <div className="flex flex-col h-screen max-w-2xl mx-auto bg-white shadow-2xl overflow-hidden">
@@ -1048,6 +1387,21 @@ export default function App() {
             </motion.div>
           )}
 
+          {activeTab === 'sessions' && (
+            <motion.div 
+              key="sessions"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <Sessions 
+                sessions={sessions} 
+                onBook={handleBookSession} 
+                onCancel={handleCancelSession} 
+              />
+            </motion.div>
+          )}
+
           {activeTab === 'progress' && (
             <motion.div 
               key="progress"
@@ -1061,35 +1415,38 @@ export default function App() {
                 <p className="text-xs opacity-50 uppercase tracking-widest mt-1">Visualizing your growth and patterns</p>
               </div>
 
-              {/* Stats Grid */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-white p-4 rounded-3xl border border-brand-cream shadow-sm flex flex-col items-center text-center">
-                  <div className="flex items-center gap-1.5 mb-1 opacity-40">
-                    <Activity size={12} />
-                    <span className="text-[8px] font-bold uppercase tracking-widest">Moods</span>
+               {/* Stats Grid */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-white p-6 rounded-3xl border border-brand-cream shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center gap-2 mb-4 opacity-40">
+                    <TrendingUp size={14} />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">Weekly Progress</span>
                   </div>
-                  <p className="text-xl font-serif">{moodLogs.length}</p>
+                  <div className="flex items-end gap-3">
+                    <p className="text-3xl font-serif text-brand-olive">{weeklyStats.thisWeekAvg.toFixed(1)}</p>
+                    {weeklyStats.lastWeekAvg > 0 && (
+                      <div className={`flex items-center text-[10px] font-bold mb-1 ${weeklyStats.improvement >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {weeklyStats.improvement >= 0 ? '↑' : '↓'} {Math.abs(weeklyStats.improvement).toFixed(0)}%
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[10px] opacity-50 mt-1">Average mood this week</p>
                 </div>
-                <div className="bg-white p-4 rounded-3xl border border-brand-cream shadow-sm flex flex-col items-center text-center">
-                  <div className="flex items-center gap-1.5 mb-1 opacity-40">
-                    <Book size={12} />
-                    <span className="text-[8px] font-bold uppercase tracking-widest">Journal</span>
+                
+                <div className="bg-white p-6 rounded-3xl border border-brand-cream shadow-sm flex flex-col justify-between relative overflow-hidden">
+                  <div className="flex items-center gap-2 mb-4 opacity-40">
+                    <Zap size={14} className={streak > 0 ? "text-orange-500 opacity-100" : ""} />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">Current Streak</span>
                   </div>
-                  <p className="text-xl font-serif">{journalEntries.length}</p>
-                </div>
-                <div className="bg-white p-4 rounded-3xl border border-brand-cream shadow-sm flex flex-col items-center text-center relative overflow-hidden">
-                  <div className="flex items-center gap-1.5 mb-1 opacity-40">
-                    <Zap size={12} className={streak > 0 ? "text-orange-500 opacity-100" : ""} />
-                    <span className="text-[8px] font-bold uppercase tracking-widest">Streak</span>
-                  </div>
-                  <p className="text-xl font-serif">{streak}d</p>
+                  <p className="text-3xl font-serif text-brand-olive">{streak}d</p>
+                  <p className="text-[10px] opacity-50 mt-1">Consecutive days active</p>
                   {streak > 0 && (
                     <motion.div 
-                      animate={{ opacity: [0.1, 0.3, 0.1], scale: [1, 1.2, 1] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                      className="absolute -bottom-2 -right-2 text-orange-500/10"
+                      animate={{ opacity: [0.1, 0.2, 0.1], scale: [1, 1.1, 1] }}
+                      transition={{ duration: 3, repeat: Infinity }}
+                      className="absolute -bottom-4 -right-4 text-orange-500/10"
                     >
-                      <Zap size={40} fill="currentColor" />
+                      <Zap size={80} fill="currentColor" />
                     </motion.div>
                   )}
                 </div>
@@ -1149,55 +1506,118 @@ export default function App() {
                 </div>
               </section>
 
-              {/* Sentiment Distribution */}
-              <section className="bg-white p-6 rounded-3xl border border-brand-cream shadow-sm">
-                <div className="flex items-center gap-2 mb-6">
-                  <Smile size={16} className="text-brand-olive" />
-                  <h3 className="text-xs font-semibold uppercase tracking-widest opacity-40">Journal Sentiment</h3>
-                </div>
-                <div className="h-64 w-full flex flex-col items-center relative">
-                  {journalEntries.length > 0 ? (
-                    <>
-                      <ResponsiveContainer width="100%" height="80%">
-                        <PieChart>
-                          <Pie
-                            data={sentimentData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={80}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {sentimentData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={SENTIMENT_COLORS[entry.name] || '#6B7280'} />
-                            ))}
-                          </Pie>
-                          <Tooltip 
-                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '12px' }}
+               {/* Sentiment Distribution */}
+              <div className="grid grid-cols-1 gap-6">
+                <section className="bg-white p-6 rounded-3xl border border-brand-cream shadow-sm">
+                  <div className="flex items-center gap-2 mb-6">
+                    <Smile size={16} className="text-brand-olive" />
+                    <h3 className="text-xs font-semibold uppercase tracking-widest opacity-40">Journal Sentiment Distribution</h3>
+                  </div>
+                  <div className="h-64 w-full flex flex-col items-center relative">
+                    {journalEntries.length > 0 ? (
+                      <>
+                        <ResponsiveContainer width="100%" height="80%">
+                          <PieChart>
+                            <Pie
+                              data={sentimentData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {sentimentData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={SENTIMENT_COLORS[entry.name] || '#6B7280'} />
+                              ))}
+                            </Pie>
+                            <Tooltip 
+                              contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute top-[40%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+                          <span className="text-[10px] font-bold uppercase tracking-widest opacity-30 block">Total</span>
+                          <span className="text-xl font-serif text-brand-olive">{journalEntries.length}</span>
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-3 mt-4">
+                          {sentimentData.map((entry) => (
+                            <div key={entry.name} className="flex items-center gap-1.5">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: SENTIMENT_COLORS[entry.name] || '#6B7280' }} />
+                              <span className="text-[10px] font-bold uppercase tracking-tighter opacity-60">{entry.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-xs opacity-40 italic">
+                        Write in your journal to see sentiment analysis
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="bg-white p-6 rounded-3xl border border-brand-cream shadow-sm">
+                  <div className="flex items-center gap-2 mb-6">
+                    <BarChart3 size={16} className="text-brand-olive" />
+                    <h3 className="text-xs font-semibold uppercase tracking-widest opacity-40">Sentiment Timeline</h3>
+                  </div>
+                  <div className="h-56 w-full">
+                    {journalEntries.length > 1 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={journalEntries.slice(-10).map(j => ({
+                          date: new Date(j.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                          value: SENTIMENT_VALUES[j.sentiment] || 3,
+                          sentiment: j.sentiment
+                        }))}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E6E6E6" />
+                          <XAxis 
+                            dataKey="date" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fill: '#141414', opacity: 0.4 }} 
                           />
-                        </PieChart>
+                          <YAxis 
+                            domain={[0, 5]} 
+                            hide
+                          />
+                          <Tooltip 
+                            cursor={{ fill: '#F5F5F0' }}
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                return (
+                                  <div className="bg-white p-3 rounded-2xl shadow-xl border border-brand-cream text-xs">
+                                    <p className="font-bold mb-1">{data.date}</p>
+                                    <p className="flex items-center gap-2">
+                                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: SENTIMENT_COLORS[data.sentiment] }} />
+                                      {data.sentiment}
+                                    </p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Bar 
+                            dataKey="value" 
+                            radius={[10, 10, 10, 10]}
+                            barSize={20}
+                          >
+                            {journalEntries.slice(-10).map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={SENTIMENT_COLORS[entry.sentiment] || '#6B7280'} />
+                            ))}
+                          </Bar>
+                        </BarChart>
                       </ResponsiveContainer>
-                      <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-                        <span className="text-[10px] font-bold uppercase tracking-widest opacity-30 block">Total</span>
-                        <span className="text-xl font-serif text-brand-olive">{journalEntries.length}</span>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-xs opacity-40 italic">
+                        Write more journal entries to see your sentiment timeline
                       </div>
-                      <div className="flex flex-wrap justify-center gap-3 mt-4">
-                        {sentimentData.map((entry) => (
-                          <div key={entry.name} className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: SENTIMENT_COLORS[entry.name] || '#6B7280' }} />
-                            <span className="text-[10px] font-bold uppercase tracking-tighter opacity-60">{entry.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-xs opacity-40 italic">
-                      Write in your journal to see sentiment analysis
-                    </div>
-                  )}
-                </div>
-              </section>
+                    )}
+                  </div>
+                </section>
+              </div>
             </motion.div>
           )}
 
@@ -1324,6 +1744,12 @@ export default function App() {
               <div className="text-center mb-6">
                 <h2 className="serif text-3xl text-brand-olive">Settings</h2>
                 <p className="text-xs opacity-50 uppercase tracking-widest mt-1">Customize your experience</p>
+                <button 
+                  onClick={handleLogout}
+                  className="mt-4 px-4 py-2 bg-red-50 text-red-600 rounded-full text-[10px] font-bold uppercase tracking-widest border border-red-100 hover:bg-red-100 transition-colors"
+                >
+                  Logout
+                </button>
               </div>
 
               {/* Settings Sub-Navigation */}
@@ -1785,9 +2211,9 @@ export default function App() {
         {[
           { id: 'chat', icon: MessageCircle, label: 'Companion' },
           { id: 'journal', icon: Book, label: 'Journal' },
+          { id: 'sessions', icon: Calendar, label: 'Sessions' },
           { id: 'mindfulness', icon: Moon, label: 'Meditate' },
           { id: 'progress', icon: TrendingUp, label: 'Progress' },
-          { id: 'toolbox', icon: Heart, label: 'Toolbox' },
           { id: 'settings', icon: Settings, label: 'Settings' },
         ].map((tab) => (
           <button
