@@ -15,6 +15,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE,
     name TEXT,
+    profile_picture TEXT,
     preferences TEXT -- JSON string for AI tone, gender, language
   );
 
@@ -66,6 +67,18 @@ db.exec(`
     completed INTEGER DEFAULT 0
   );
 `);
+
+// Migration: Add profile_picture column if it doesn't exist
+try {
+  const tableInfo = db.prepare("PRAGMA table_info(users)").all() as any[];
+  const hasProfilePicture = tableInfo.some(col => col.name === 'profile_picture');
+  if (!hasProfilePicture) {
+    db.exec("ALTER TABLE users ADD COLUMN profile_picture TEXT");
+    console.log("Migration: Added profile_picture column to users table");
+  }
+} catch (e) {
+  console.error("Migration error:", e);
+}
 
 async function startServer() {
   const app = express();
@@ -172,6 +185,34 @@ async function startServer() {
     const { completed } = req.body;
     const stmt = db.prepare("UPDATE reminders SET completed = ? WHERE id = ?");
     stmt.run(completed ? 1 : 0, req.params.id);
+    res.json({ success: true });
+  });
+
+  // User Profile
+  app.get("/api/user/:user_id", (req, res) => {
+    const stmt = db.prepare("SELECT id, email, name, profile_picture FROM users WHERE id = ?");
+    const user = stmt.get(req.params.user_id);
+    if (user) {
+      res.json(user);
+    } else {
+      res.json({ id: req.params.user_id, name: "User", email: "", profile_picture: null });
+    }
+  });
+
+  app.post("/api/user", (req, res) => {
+    const { user_id, name, email, profile_picture } = req.body;
+    const userId = user_id || 1;
+
+    const checkUser = db.prepare("SELECT id FROM users WHERE id = ?");
+    const user = checkUser.get(userId);
+
+    if (user) {
+      const stmt = db.prepare("UPDATE users SET name = ?, email = ?, profile_picture = ? WHERE id = ?");
+      stmt.run(name, email, profile_picture, userId);
+    } else {
+      const stmt = db.prepare("INSERT INTO users (id, name, email, profile_picture) VALUES (?, ?, ?, ?)");
+      stmt.run(userId, name, email, profile_picture);
+    }
     res.json({ success: true });
   });
 

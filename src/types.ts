@@ -23,7 +23,10 @@ export interface UserPreferences {
   voice: 'Kore' | 'Puck' | 'Charon' | 'Fenrir' | 'Zephyr';
   language: 'en' | 'sw';
   tone: 'empathetic' | 'professional' | 'cheerful' | 'calm' | 'direct';
+  formality: 'casual' | 'neutral' | 'formal';
+  responseLength: 'concise' | 'balanced' | 'detailed';
   backstory?: string;
+  aiName?: string;
   isSpeakingEnabled: boolean;
 }
 
